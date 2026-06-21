@@ -1,0 +1,27 @@
+{
+  "name": "zeptoclaw",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/sennamind/zeptoclaw.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/sennamind/zeptoclaw/issues"
+  },
+  "homepage": "https://github.com/sennamind/zeptoclaw#readme",
+  "type": "module",
+  "dependencies": {
+    "@anthropic-ai/claude-agent-sdk": "^0.3.185"
+  },
+  "devDependencies": {
+    "tsx": "^4.22.4"
+  }
+}
