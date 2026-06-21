@@ -13,10 +13,11 @@ export async function ask(prompt: string): Promise<string> {
     .join("\n");
   const fullPrompt = history ? `${history}\nuser: ${prompt}` : prompt;
 
-  let reply = "";
+  let reply: string | undefined;
   for await (const event of query({ prompt: fullPrompt })) {
     if (event.type === "result" && event.subtype === "success") reply = event.result;
   }
+  if (reply === undefined) throw new Error("no reply from model");
   return reply;
 }
 
@@ -24,8 +25,12 @@ const rl = createInterface({ input: process.stdin, output: process.stdout });
 for (;;) {
   const prompt = await rl.question("you: ");
   if (!prompt.trim()) continue;
-  const reply = await ask(prompt);
-  addMessage("user", prompt);
-  addMessage("assistant", reply);
-  console.log("claw:", reply);
+  try {
+    const reply = await ask(prompt);
+    addMessage("user", prompt);
+    addMessage("assistant", reply);
+    console.log("claw:", reply);
+  } catch (err) {
+    console.error("error:", err instanceof Error ? err.message : err);
+  }
 }

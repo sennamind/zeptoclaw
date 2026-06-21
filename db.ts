@@ -14,7 +14,8 @@ export function getMessages(): { role: string; content: string }[] {
   return selectAll.all() as { role: string; content: string }[];
 }
 
-// Self-check: write then read round-trips. Run with `npx tsx db.ts`.
+// Self-check: write then read round-trips, then delete exactly the rows it
+// inserted so the real conversation history stays clean. Run `npx tsx db.ts`.
 if (import.meta.url === `file://${process.argv[1]}`) {
   const before = getMessages().length;
   addMessage("user", "ping");
@@ -24,5 +25,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   const [u, a] = rows.slice(-2);
   if (u.role !== "user" || u.content !== "ping") throw new Error("user row mismatch");
   if (a.role !== "assistant" || a.content !== "pong") throw new Error("assistant row mismatch");
-  console.log("db self-check OK:", rows.length, "messages total");
+  db.exec("DELETE FROM messages WHERE rowid IN (SELECT rowid FROM messages ORDER BY rowid DESC LIMIT 2)");
+  if (getMessages().length !== before) throw new Error("self-check left rows behind");
+  console.log("db self-check OK: round-trip passed,", before, "messages still stored");
 }
