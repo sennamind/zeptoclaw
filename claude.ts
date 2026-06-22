@@ -2,8 +2,8 @@ import { createInterface } from "node:readline/promises";
 import { query } from "@anthropic-ai/claude-agent-sdk";
 import { addMessage, getMessages } from "./db.js";
 
-if (!process.env.ANTHROPIC_API_KEY) {
-  console.error("set ANTHROPIC_API_KEY to run zepto-claw");
+if (!process.env.ANTHROPIC_API_KEY && !process.env.CLAUDE_CODE_OAUTH_TOKEN) {
+  console.error("set ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN to run zepto-claw");
   process.exit(1);
 }
 
