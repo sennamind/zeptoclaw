@@ -21,16 +21,20 @@ export async function ask(prompt: string): Promise<string> {
   return reply;
 }
 
-const rl = createInterface({ input: process.stdin, output: process.stdout });
-for (;;) {
-  const prompt = await rl.question("you: ");
-  if (!prompt.trim()) continue;
-  try {
-    const reply = await ask(prompt);
-    addMessage("user", prompt);
-    addMessage("assistant", reply);
-    console.log("claw:", reply);
-  } catch (err) {
-    console.error("error:", err instanceof Error ? err.message : err);
+// Terminal REPL — only when this file is the entry point, so other mouths
+// (whatsapp.ts) can import ask() without starting the readline loop.
+if (import.meta.url === `file://${process.argv[1]}`) {
+  const rl = createInterface({ input: process.stdin, output: process.stdout });
+  for (;;) {
+    const prompt = await rl.question("you: ");
+    if (!prompt.trim()) continue;
+    try {
+      const reply = await ask(prompt);
+      addMessage("user", prompt);
+      addMessage("assistant", reply);
+      console.log("claw:", reply);
+    } catch (err) {
+      console.error("error:", err instanceof Error ? err.message : err);
+    }
   }
 }
