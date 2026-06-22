@@ -14,7 +14,16 @@ export async function ask(prompt: string): Promise<string> {
   const fullPrompt = history ? `${history}\nuser: ${prompt}` : prompt;
 
   let reply: string | undefined;
-  for await (const event of query({ prompt: fullPrompt })) {
+  // settingSources:[] isolates the claw from this machine's Claude Code setup
+  // (CLAUDE.md, hooks, the ponytail persona) so it answers as a plain assistant,
+  // not as a dev tool. systemPrompt replaces the default coding-agent prompt.
+  for await (const event of query({
+    prompt: fullPrompt,
+    options: {
+      settingSources: [],
+      systemPrompt: "You are zepto-claw, a friendly, concise assistant chatting over WhatsApp. Answer directly. No coding-tool chatter.",
+    },
+  })) {
     if (event.type === "result" && event.subtype === "success") reply = event.result;
   }
   if (reply === undefined) throw new Error("no reply from model");
