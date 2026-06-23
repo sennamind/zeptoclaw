@@ -103,6 +103,17 @@ const claw = createSdkMcpServer({
         return { content: [{ type: "text", text: `water reminder set every ${hours}h (first nudge in ~${Math.round(ms / 60000)} min)` }] };
       },
     ),
+    // Stop the recurring water nudges.
+    tool(
+      "stop_water_reminder",
+      "Stop the recurring water reminders. Use when the user says stop/cancel/quit the water reminders.",
+      {},
+      async () => {
+        if (!reminderScheduler) return { content: [{ type: "text", text: "no reminders to stop here" }] };
+        reminderScheduler(0); // 0 hours = cancel
+        return { content: [{ type: "text", text: "water reminders stopped" }] };
+      },
+    ),
     // Record water the user drank and report progress toward the daily goal.
     tool(
       "log_water",
@@ -138,13 +149,14 @@ export async function ask(prompt: string): Promise<string> {
     options: {
       settingSources: [],
       systemPrompt:
-        "You are zepto-claw, a friendly, concise assistant chatting over WhatsApp. Answer directly. No coding-tool chatter. To show the user a web page, video, search, or directions, use open_url. To find a file they ask about, use find_documents, then send_document to deliver it. If find_documents returns several matches, pick the most likely one and send it. If the user asks to be reminded to drink water, use set_water_reminder. When they tell you they drank water (replies like 'done', '500ml', 'a glass'), use log_water with your best ml estimate (glass ~250ml, bottle ~500ml) and cheer them on. If they ask how much they've had, use water_today.",
+        "You are zepto-claw, a friendly, concise assistant chatting over WhatsApp. Answer directly. No coding-tool chatter. To show the user a web page, video, search, or directions, use open_url. To find a file they ask about, use find_documents, then send_document to deliver it. If find_documents returns several matches, pick the most likely one and send it. If the user asks to be reminded to drink water, use set_water_reminder. If they say stop/cancel the reminders, use stop_water_reminder. When they tell you they drank water (replies like 'done', '500ml', 'a glass'), use log_water with your best ml estimate (glass ~250ml, bottle ~500ml) and cheer them on. If they ask how much they've had, use water_today.",
       mcpServers: { claw },
       allowedTools: [
         "mcp__claw__open_url",
         "mcp__claw__find_documents",
         "mcp__claw__send_document",
         "mcp__claw__set_water_reminder",
+        "mcp__claw__stop_water_reminder",
         "mcp__claw__log_water",
         "mcp__claw__water_today",
       ],

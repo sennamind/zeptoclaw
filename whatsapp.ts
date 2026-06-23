@@ -76,6 +76,8 @@ if (import.meta.url === `file://${process.argv[1]}` && process.argv.includes("--
     let waterTimer: ReturnType<typeof setInterval> | null = null;
     onScheduleReminder((hours) => {
       if (waterTimer) clearInterval(waterTimer);
+      waterTimer = null;
+      if (hours <= 0) return 0; // cancel
       const ms = Number(process.env.WATER_MS) || hours * 60 * 60 * 1000;
       waterTimer = setInterval(() => {
         client.sendMessage(me, MARK + "💧 Water break! How much did you drink? (e.g. '500ml' or 'a glass')");
