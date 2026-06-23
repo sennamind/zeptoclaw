@@ -110,6 +110,33 @@ export async function ask(prompt: string): Promise<string> {
   return reply;
 }
 
+// The heartbeat's content: a live news briefing via web search. One-shot, no
+// conversation history and not stored in the DB — it's a push, not a chat turn.
+const BRIEFING_PROMPT = `Use web search for the very latest, then write a short WhatsApp news briefing.
+Exactly these 5 lines, each ONE sentence, specific and current (include figures where relevant):
+1. 📈 India markets — today's Sensex & Nifty level and move
+2. 📊 US markets — latest S&P 500 / Dow / Nasdaq move
+3. 🇮🇳 Top India headline
+4. 🌍 Top world headline
+5. 🤖 Biggest AI story
+Start with a one-line header like "🗞️ Your briefing — <date>". No preamble, no sources list, no extra commentary.`;
+
+export async function briefing(): Promise<string> {
+  let reply: string | undefined;
+  for await (const event of query({
+    prompt: BRIEFING_PROMPT,
+    options: {
+      settingSources: [],
+      systemPrompt: "You are zepto-claw writing a crisp daily news briefing for WhatsApp.",
+      allowedTools: ["WebSearch"],
+    },
+  })) {
+    if (event.type === "result" && event.subtype === "success") reply = event.result;
+  }
+  if (reply === undefined) throw new Error("no briefing from model");
+  return reply;
+}
+
 // Terminal REPL — only when this file is the entry point, so other mouths
 // (whatsapp.ts) can import ask() without starting the readline loop.
 if (import.meta.url === `file://${process.argv[1]}`) {

@@ -4,7 +4,7 @@
 import pkg from "whatsapp-web.js";
 const { Client, LocalAuth, MessageMedia } = pkg;
 import qrcode from "qrcode-terminal";
-import { ask, onSendFile, isInsideDocs } from "./claude.js";
+import { ask, briefing, onSendFile, isInsideDocs } from "./claude.js";
 import { addMessage } from "./db.js";
 
 // Only reply to a real one-to-one chat — never groups or status broadcasts,
@@ -53,7 +53,23 @@ if (import.meta.url === `file://${process.argv[1]}` && process.argv.includes("--
     console.log("scan this with WhatsApp → Settings → Linked devices:");
     qrcode.generate(qr, { small: true });
   });
-  client.on("ready", () => console.log("zepto-claw has a mouth. text it on WhatsApp."));
+  client.on("ready", () => {
+    console.log("zepto-claw has a mouth. text it on WhatsApp.");
+    // Heartbeat: push a live news briefing to your own chat. Fires once now so
+    // a demo sees it immediately, then every interval.
+    // ponytail: set HEARTBEAT_MS=60000 to demo fast; a daily cron is the real fit.
+    const me = client.info.wid._serialized;
+    const HEARTBEAT_MS = Number(process.env.HEARTBEAT_MS) || 60 * 60 * 1000;
+    const beat = async () => {
+      try {
+        await client.sendMessage(me, MARK + (await briefing()));
+      } catch (err) {
+        console.error("heartbeat error:", err instanceof Error ? err.message : err);
+      }
+    };
+    beat();
+    setInterval(beat, HEARTBEAT_MS);
+  });
 
   // message_create (not message) so it also fires for messages you send yourself.
   client.on("message_create", async (msg) => {
