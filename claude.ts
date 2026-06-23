@@ -1,13 +1,45 @@
 import { createInterface } from "node:readline/promises";
 import { execFile } from "node:child_process";
-import { realpathSync } from "node:fs";
-import { homedir } from "node:os";
+import { realpathSync, readFileSync } from "node:fs";
+import { homedir, tmpdir } from "node:os";
 import { join, sep } from "node:path";
 import { query, createSdkMcpServer, tool } from "@anthropic-ai/claude-agent-sdk";
 import { z } from "zod";
 import { addMessage, getMessages, addWater, waterToday, addNote, getNotes } from "./db.js";
 
 const WATER_GOAL_ML = 3000; // ponytail: fixed daily goal; make it per-user later
+
+// The swappable brain: friendly name -> model id. Default from ZC_MODEL, else
+// opus. currentBrain is mutated at runtime by the set_brain tool.
+// ponytail: in-memory — a restart returns to the default; persist it in db if
+// the choice should stick.
+const BRAINS: Record<string, string> = {
+  opus: "claude-opus-4-8",
+  sonnet: "claude-sonnet-4-6",
+  haiku: "claude-haiku-4-5-20251001",
+  fable: "claude-fable-5",
+};
+// "codex" is a different mind entirely — OpenAI's GPT-5 via the Codex CLI, not
+// a Claude model. It runs through askCodex() below instead of the Claude SDK,
+// so it has no claw tools and is slow (codex exec is a heavyweight agent).
+const CODEX = "codex";
+let currentBrain = process.env.ZC_MODEL && (BRAINS[process.env.ZC_MODEL] || process.env.ZC_MODEL === CODEX) ? process.env.ZC_MODEL : "opus";
+
+// Run a prompt through the Codex CLI; -o writes just the final message to a file.
+// codex is a heavyweight agent — keep the prompt SMALL and cap it with a timeout
+// so a slow/stuck run can't hang the bot. ponytail: pid temp file, one chat at a time.
+const CODEX_TIMEOUT_MS = 120_000;
+async function askCodex(prompt: string): Promise<string> {
+  const out = join(tmpdir(), `zc-codex-${process.pid}.txt`);
+  await new Promise<void>((res, rej) =>
+    execFile(
+      "codex",
+      ["exec", "--skip-git-repo-check", "-o", out, prompt],
+      { maxBuffer: 10 << 20, timeout: CODEX_TIMEOUT_MS, killSignal: "SIGKILL" },
+      (e) => (e ? rej(e) : res()),
+    ));
+  return readFileSync(out, "utf8").trim();
+}
 
 if (!process.env.ANTHROPIC_API_KEY && !process.env.CLAUDE_CODE_OAUTH_TOKEN) {
   console.error("set ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN to run zepto-claw");
@@ -141,6 +173,17 @@ const claw = createSdkMcpServer({
         return { content: [{ type: "text", text: `noted in diary: ${note}` }] };
       },
     ),
+    // Swap the model powering the claw. Takes effect on the next message.
+    tool(
+      "set_brain",
+      "Switch which AI model powers you: opus (smartest), sonnet (balanced), haiku (fastest), fable, or codex (OpenAI GPT-5 — a different company's model; slow and has no tools). Use when the user asks to switch/change your model or brain.",
+      { brain: z.enum(["opus", "sonnet", "haiku", "fable", "codex"]).describe("which brain to use") },
+      async ({ brain }) => {
+        currentBrain = brain;
+        const label = brain === CODEX ? "GPT-5 via Codex CLI — slower, no tools" : BRAINS[brain];
+        return { content: [{ type: "text", text: `brain swapped to ${brain} (${label}) — active from your next message` }] };
+      },
+    ),
   ],
 });
 
@@ -154,6 +197,17 @@ export async function ask(prompt: string): Promise<string> {
     .join("\n");
   const fullPrompt = diary + (history ? `${history}\nuser: ${prompt}` : `user: ${prompt}`);
 
+  // Codex brain: a wholly different mind (GPT-5). No claw tools, no transcript —
+  // just the diary + the latest message, kept small so codex answers in time.
+  if (currentBrain === CODEX) {
+    try {
+      const reply = await askCodex(`You are zepto-claw, a friendly, concise WhatsApp assistant. Reply directly and briefly, no code.\n\n${diary}user: ${prompt}`);
+      return reply || "(codex returned nothing)";
+    } catch {
+      return "my codex brain took too long — switch me back with 'use opus'.";
+    }
+  }
+
   let reply: string | undefined;
   // settingSources:[] isolates the claw from this machine's Claude Code setup
   // (CLAUDE.md, hooks, the ponytail persona) so it answers as a plain assistant,
@@ -162,8 +216,9 @@ export async function ask(prompt: string): Promise<string> {
     prompt: fullPrompt,
     options: {
       settingSources: [],
+      model: BRAINS[currentBrain],
       systemPrompt:
-        "You are zepto-claw, a friendly, concise assistant chatting over WhatsApp. Answer directly. No coding-tool chatter. To show the user a web page, video, search, or directions, use open_url. To find a file they ask about, use find_documents, then send_document to deliver it. If find_documents returns several matches, pick the most likely one and send it. If the user asks to be reminded to drink water, use set_water_reminder. If they say stop/cancel the reminders, use stop_water_reminder. When they tell you they drank water (replies like 'done', '500ml', 'a glass'), use log_water with your best ml estimate (glass ~250ml, bottle ~500ml) and cheer them on. If they ask how much they've had, use water_today. You keep a long-term diary: when you learn a durable fact worth recalling days later (their name, preferences, goals, important details), call remember. Your current diary appears at the top of the conversation — use it to personalize answers.",
+        `You are zepto-claw, a friendly, concise assistant chatting over WhatsApp. You are currently running on the '${currentBrain}' brain (${BRAINS[currentBrain]}). Answer directly. No coding-tool chatter. To show the user a web page, video, search, or directions, use open_url. To find a file they ask about, use find_documents, then send_document to deliver it. If find_documents returns several matches, pick the most likely one and send it. If the user asks to be reminded to drink water, use set_water_reminder. If they say stop/cancel the reminders, use stop_water_reminder. When they tell you they drank water (replies like 'done', '500ml', 'a glass'), use log_water with your best ml estimate (glass ~250ml, bottle ~500ml) and cheer them on. If they ask how much they've had, use water_today. You keep a long-term diary: when you learn a durable fact worth recalling days later (their name, preferences, goals, important details), call remember. Your current diary appears at the top of the conversation — use it to personalize answers. If the user asks to switch your model/brain, use set_brain.`,
       mcpServers: { claw },
       allowedTools: [
         "mcp__claw__open_url",
@@ -174,6 +229,7 @@ export async function ask(prompt: string): Promise<string> {
         "mcp__claw__log_water",
         "mcp__claw__water_today",
         "mcp__claw__remember",
+        "mcp__claw__set_brain",
       ],
     },
   })) {
@@ -200,6 +256,7 @@ export async function briefing(): Promise<string> {
     prompt: BRIEFING_PROMPT,
     options: {
       settingSources: [],
+      model: BRAINS[currentBrain] ?? BRAINS.opus, // briefing needs WebSearch — stay on a Claude brain
       systemPrompt: "You are zepto-claw writing a crisp daily news briefing for WhatsApp.",
       allowedTools: ["WebSearch"],
     },
