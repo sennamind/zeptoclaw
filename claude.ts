@@ -5,7 +5,7 @@ import { homedir } from "node:os";
 import { join, sep } from "node:path";
 import { query, createSdkMcpServer, tool } from "@anthropic-ai/claude-agent-sdk";
 import { z } from "zod";
-import { addMessage, getMessages, addWater, waterToday } from "./db.js";
+import { addMessage, getMessages, addWater, waterToday, addNote, getNotes } from "./db.js";
 
 const WATER_GOAL_ML = 3000; // ponytail: fixed daily goal; make it per-user later
 
@@ -131,14 +131,28 @@ const claw = createSdkMcpServer({
       {},
       async () => ({ content: [{ type: "text", text: `${waterToday()} / ${WATER_GOAL_ML}ml today` }] }),
     ),
+    // Write a durable fact to the long-term diary (always carried into chats).
+    tool(
+      "remember",
+      "Save a durable fact about the user to your long-term diary — their name, preferences, goals, important life details. Use sparingly: only things worth recalling days later, never small talk.",
+      { note: z.string().describe("the fact to remember, as a short statement, e.g. 'Allergic to peanuts'") },
+      async ({ note }) => {
+        addNote(note);
+        return { content: [{ type: "text", text: `noted in diary: ${note}` }] };
+      },
+    ),
   ],
 });
 
 export async function ask(prompt: string): Promise<string> {
+  // The diary rides along on top of the raw transcript — curated long-term
+  // memory the claw chose to keep, so it persists even as chat history grows.
+  const notes = getNotes();
+  const diary = notes.length ? `(Your diary — durable facts about the user:\n- ${notes.join("\n- ")})\n\n` : "";
   const history = getMessages()
     .map((m) => `${m.role}: ${m.content}`)
     .join("\n");
-  const fullPrompt = history ? `${history}\nuser: ${prompt}` : prompt;
+  const fullPrompt = diary + (history ? `${history}\nuser: ${prompt}` : `user: ${prompt}`);
 
   let reply: string | undefined;
   // settingSources:[] isolates the claw from this machine's Claude Code setup
@@ -149,7 +163,7 @@ export async function ask(prompt: string): Promise<string> {
     options: {
       settingSources: [],
       systemPrompt:
-        "You are zepto-claw, a friendly, concise assistant chatting over WhatsApp. Answer directly. No coding-tool chatter. To show the user a web page, video, search, or directions, use open_url. To find a file they ask about, use find_documents, then send_document to deliver it. If find_documents returns several matches, pick the most likely one and send it. If the user asks to be reminded to drink water, use set_water_reminder. If they say stop/cancel the reminders, use stop_water_reminder. When they tell you they drank water (replies like 'done', '500ml', 'a glass'), use log_water with your best ml estimate (glass ~250ml, bottle ~500ml) and cheer them on. If they ask how much they've had, use water_today.",
+        "You are zepto-claw, a friendly, concise assistant chatting over WhatsApp. Answer directly. No coding-tool chatter. To show the user a web page, video, search, or directions, use open_url. To find a file they ask about, use find_documents, then send_document to deliver it. If find_documents returns several matches, pick the most likely one and send it. If the user asks to be reminded to drink water, use set_water_reminder. If they say stop/cancel the reminders, use stop_water_reminder. When they tell you they drank water (replies like 'done', '500ml', 'a glass'), use log_water with your best ml estimate (glass ~250ml, bottle ~500ml) and cheer them on. If they ask how much they've had, use water_today. You keep a long-term diary: when you learn a durable fact worth recalling days later (their name, preferences, goals, important details), call remember. Your current diary appears at the top of the conversation — use it to personalize answers.",
       mcpServers: { claw },
       allowedTools: [
         "mcp__claw__open_url",
@@ -159,6 +173,7 @@ export async function ask(prompt: string): Promise<string> {
         "mcp__claw__stop_water_reminder",
         "mcp__claw__log_water",
         "mcp__claw__water_today",
+        "mcp__claw__remember",
       ],
     },
   })) {

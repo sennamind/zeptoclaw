@@ -3,11 +3,14 @@ import { DatabaseSync } from "node:sqlite";
 const db = new DatabaseSync("zeptoclaw.db");
 db.exec("CREATE TABLE IF NOT EXISTS messages (role TEXT, content TEXT)");
 db.exec("CREATE TABLE IF NOT EXISTS water (day TEXT, ml INTEGER)");
+db.exec("CREATE TABLE IF NOT EXISTS diary (ts TEXT, note TEXT)");
 
 const insert = db.prepare("INSERT INTO messages (role, content) VALUES (?, ?)");
 const selectAll = db.prepare("SELECT role, content FROM messages ORDER BY rowid");
 const insertWater = db.prepare("INSERT INTO water (day, ml) VALUES (?, ?)");
 const sumWater = db.prepare("SELECT COALESCE(SUM(ml), 0) AS total FROM water WHERE day = ?");
+const insertNote = db.prepare("INSERT INTO diary (ts, note) VALUES (?, ?)");
+const selectNotes = db.prepare("SELECT note FROM diary ORDER BY rowid");
 
 export function addMessage(role: string, content: string) {
   insert.run(role, content);
@@ -25,6 +28,15 @@ export function addWater(ml: number) {
 
 export function waterToday(): number {
   return (sumWater.get(today()) as { total: number }).total;
+}
+
+// The diary: durable facts the claw chooses to remember, carried into every chat.
+export function addNote(note: string) {
+  insertNote.run(new Date().toISOString(), note);
+}
+
+export function getNotes(): string[] {
+  return (selectNotes.all() as { note: string }[]).map((r) => r.note);
 }
 
 // Self-check: write then read round-trips, then delete exactly the rows it
@@ -46,5 +58,11 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   if (waterToday() !== wBefore + 250) throw new Error("water not summed for today");
   db.exec("DELETE FROM water WHERE rowid = (SELECT MAX(rowid) FROM water)");
   if (waterToday() !== wBefore) throw new Error("water self-check left a row behind");
+  // Diary: a saved note round-trips, then clean up just that one row.
+  const nBefore = getNotes().length;
+  addNote("self-check note");
+  if (!getNotes().includes("self-check note")) throw new Error("diary note not saved");
+  db.exec("DELETE FROM diary WHERE rowid = (SELECT MAX(rowid) FROM diary)");
+  if (getNotes().length !== nBefore) throw new Error("diary self-check left a row behind");
   console.log("db self-check OK: round-trip passed,", before, "messages still stored");
 }
