@@ -1,7 +1,7 @@
 import { createInterface } from "node:readline/promises";
 import { execFile } from "node:child_process";
-import { realpathSync, readFileSync } from "node:fs";
-import { homedir, tmpdir } from "node:os";
+import { realpathSync } from "node:fs";
+import { homedir } from "node:os";
 import { join, sep } from "node:path";
 import { query, createSdkMcpServer, tool } from "@anthropic-ai/claude-agent-sdk";
 import { z } from "zod";
@@ -19,27 +19,7 @@ const BRAINS: Record<string, string> = {
   haiku: "claude-haiku-4-5-20251001",
   fable: "claude-fable-5",
 };
-// "codex" is a different mind entirely — OpenAI's GPT-5 via the Codex CLI, not
-// a Claude model. It runs through askCodex() below instead of the Claude SDK,
-// so it has no claw tools and is slow (codex exec is a heavyweight agent).
-const CODEX = "codex";
-let currentBrain = process.env.ZC_MODEL && (BRAINS[process.env.ZC_MODEL] || process.env.ZC_MODEL === CODEX) ? process.env.ZC_MODEL : "opus";
-
-// Run a prompt through the Codex CLI; -o writes just the final message to a file.
-// codex is a heavyweight agent — keep the prompt SMALL and cap it with a timeout
-// so a slow/stuck run can't hang the bot. ponytail: pid temp file, one chat at a time.
-const CODEX_TIMEOUT_MS = 120_000;
-async function askCodex(prompt: string): Promise<string> {
-  const out = join(tmpdir(), `zc-codex-${process.pid}.txt`);
-  await new Promise<void>((res, rej) =>
-    execFile(
-      "codex",
-      ["exec", "--skip-git-repo-check", "-o", out, prompt],
-      { maxBuffer: 10 << 20, timeout: CODEX_TIMEOUT_MS, killSignal: "SIGKILL" },
-      (e) => (e ? rej(e) : res()),
-    ));
-  return readFileSync(out, "utf8").trim();
-}
+let currentBrain = process.env.ZC_MODEL && BRAINS[process.env.ZC_MODEL] ? process.env.ZC_MODEL : "opus";
 
 if (!process.env.ANTHROPIC_API_KEY && !process.env.CLAUDE_CODE_OAUTH_TOKEN) {
   console.error("set ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN to run zepto-claw");
@@ -176,12 +156,11 @@ const claw = createSdkMcpServer({
     // Swap the model powering the claw. Takes effect on the next message.
     tool(
       "set_brain",
-      "Switch which AI model powers you: opus (smartest), sonnet (balanced), haiku (fastest), fable, or codex (OpenAI GPT-5 — a different company's model; slow and has no tools). Use when the user asks to switch/change your model or brain.",
-      { brain: z.enum(["opus", "sonnet", "haiku", "fable", "codex"]).describe("which brain to use") },
+      "Switch which AI model powers you: opus (smartest), sonnet (balanced), haiku (fastest), or fable. Use when the user asks to switch/change your model or brain.",
+      { brain: z.enum(["opus", "sonnet", "haiku", "fable"]).describe("which brain to use") },
       async ({ brain }) => {
         currentBrain = brain;
-        const label = brain === CODEX ? "GPT-5 via Codex CLI — slower, no tools" : BRAINS[brain];
-        return { content: [{ type: "text", text: `brain swapped to ${brain} (${label}) — active from your next message` }] };
+        return { content: [{ type: "text", text: `brain swapped to ${brain} (${BRAINS[brain]}) — active from your next message` }] };
       },
     ),
   ],
@@ -196,17 +175,6 @@ export async function ask(prompt: string): Promise<string> {
     .map((m) => `${m.role}: ${m.content}`)
     .join("\n");
   const fullPrompt = diary + (history ? `${history}\nuser: ${prompt}` : `user: ${prompt}`);
-
-  // Codex brain: a wholly different mind (GPT-5). No claw tools, no transcript —
-  // just the diary + the latest message, kept small so codex answers in time.
-  if (currentBrain === CODEX) {
-    try {
-      const reply = await askCodex(`You are zepto-claw, a friendly, concise WhatsApp assistant. Reply directly and briefly, no code.\n\n${diary}user: ${prompt}`);
-      return reply || "(codex returned nothing)";
-    } catch {
-      return "my codex brain took too long — switch me back with 'use opus'.";
-    }
-  }
 
   let reply: string | undefined;
   // settingSources:[] isolates the claw from this machine's Claude Code setup
@@ -256,7 +224,7 @@ export async function briefing(): Promise<string> {
     prompt: BRIEFING_PROMPT,
     options: {
       settingSources: [],
-      model: BRAINS[currentBrain] ?? BRAINS.opus, // briefing needs WebSearch — stay on a Claude brain
+      model: BRAINS[currentBrain],
       systemPrompt: "You are zepto-claw writing a crisp daily news briefing for WhatsApp.",
       allowedTools: ["WebSearch"],
     },
