@@ -4,7 +4,7 @@
 import pkg from "whatsapp-web.js";
 const { Client, LocalAuth, MessageMedia } = pkg;
 import qrcode from "qrcode-terminal";
-import { ask, briefing, onSendFile, isInsideDocs } from "./claude.js";
+import { ask, briefing, onSendFile, onScheduleReminder, isInsideDocs } from "./claude.js";
 import { addMessage } from "./db.js";
 
 // Only reply to a real one-to-one chat — never groups or status broadcasts,
@@ -69,6 +69,19 @@ if (import.meta.url === `file://${process.argv[1]}` && process.argv.includes("--
     };
     beat();
     setInterval(beat, HEARTBEAT_MS);
+
+    // Water reminders: the set_water_reminder tool calls this to (re)start a
+    // recurring nudge to your own chat. WATER_MS overrides the stated hours so a
+    // demo fires in seconds instead of waiting 3 real hours.
+    let waterTimer: ReturnType<typeof setInterval> | null = null;
+    onScheduleReminder((hours) => {
+      if (waterTimer) clearInterval(waterTimer);
+      const ms = Number(process.env.WATER_MS) || hours * 60 * 60 * 1000;
+      waterTimer = setInterval(() => {
+        client.sendMessage(me, MARK + "💧 Water break! How much did you drink? (e.g. '500ml' or 'a glass')");
+      }, ms);
+      return ms;
+    });
   });
 
   // message_create (not message) so it also fires for messages you send yourself.
